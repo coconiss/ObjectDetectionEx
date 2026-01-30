@@ -130,3 +130,4 @@ D:\MySource\C#\ObjectDetectionApp\ObjectDetectionApp\bin\Debug\net8.0-windows\ru
 D:\MySource\C#\ObjectDetectionApp\ObjectDetectionApp\bin\Debug\net8.0-windows\runtimes\win-arm64\native\libSkiaSharp.dll
 D:\MySource\C#\ObjectDetectionApp\ObjectDetectionApp\bin\Debug\net8.0-windows\runtimes\win-x64\native\libSkiaSharp.dll
 D:\MySource\C#\ObjectDetectionApp\ObjectDetectionApp\bin\Debug\net8.0-windows\runtimes\win-x86\native\libSkiaSharp.dll
+D:\MySource\C#\ObjectDetectionApp\ObjectDetectionApp\obj\Debug\net8.0-windows\ObjectDetectionApp.sourcelink.json

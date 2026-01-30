@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 
 namespace ObjectDetectionApp.Models
@@ -52,5 +53,24 @@ namespace ObjectDetectionApp.Models
         Idle,       // 대기
         Training,   // 학습 모드
         Detection   // 검출 모드
+    }
+
+    /// <summary>
+    /// 저장된 모델 정보
+    /// </summary>
+    public class SavedModel
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string Name { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public int SampleCount { get; set; }
+        public List<string> Labels { get; set; } = new List<string>();
+        public List<TrainingData> TrainingData { get; set; } = new List<TrainingData>();
+        public bool IsActive { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Name} ({SampleCount}개 샘플)";
+        }
     }
 }
