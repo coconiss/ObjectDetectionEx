@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<UseWPF>true</UseWPF>
+		<PlatformTarget>x64</PlatformTarget>
+		<!--<ApplicationIcon>app.ico</ApplicationIcon>-->
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- OpenCV for camera and image processing -->
+		<PackageReference Include="OpenCvSharp4" Version="4.9.0.20240103" />
+		<PackageReference Include="OpenCvSharp4.Extensions" Version="4.9.0.20240103" />
+		<PackageReference Include="OpenCvSharp4.runtime.win" Version="4.9.0.20240103" />
+
+		<!-- ML.NET for machine learning -->
+		<PackageReference Include="Microsoft.ML" Version="3.0.1" />
+		<PackageReference Include="Microsoft.ML.Vision" Version="3.0.1" />
+		<PackageReference Include="Microsoft.ML.ImageAnalytics" Version="3.0.1" />
+
+		<!-- Additional utilities -->
+		<PackageReference Include="System.Drawing.Common" Version="8.0.1" />
+	</ItemGroup>
+
+</Project>
