@@ -4,8 +4,9 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="객체 인식 및 이미지 보정 시스템" Height="720" Width="1280"
-        WindowStartupLocation="CenterScreen">
+        Title="객체 인식 및 이미지 보정 시스템" 
+        WindowState="Maximized"
+        ResizeMode="NoResize">
 
     <Window.Resources>
         <Style TargetType="Button">
@@ -129,11 +130,23 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Background="#34495E" Padding="10">
-                        <TextBlock Text="학습 데이터 목록" 
-                                  FontSize="16" 
-                                  FontWeight="Bold" 
-                                  Foreground="White"
-                                  HorizontalAlignment="Center"/>
+                        <DockPanel>
+                            <TextBlock Text="학습 데이터 목록" 
+                                      FontSize="16" 
+                                      FontWeight="Bold" 
+                                      Foreground="White"
+                                      HorizontalAlignment="Center"
+                                      DockPanel.Dock="Left"/>
+
+                            <!-- 모델 불러오기 버튼 추가 -->
+                            <Button Content="모델 불러오기" 
+                                    HorizontalAlignment="Right" 
+                                    DockPanel.Dock="Right" 
+                                    Click="LoadModelButton_Click" 
+                                    Background="#3498DB" 
+                                    Foreground="White" 
+                                    Padding="8,4"/>
+                        </DockPanel>
                     </Border>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

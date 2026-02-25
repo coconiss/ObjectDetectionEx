@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="객체 라벨링" Height="400" Width="500"
         WindowStartupLocation="CenterOwner"
+        WindowState="Maximized"
         ResizeMode="NoResize">
 
     <Grid Margin="20">

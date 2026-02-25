@@ -5,13 +5,15 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Shapes;
 using OpenCvSharp;
 using ObjectDetectionApp.Models;
 using ObjectDetectionApp.Services;
 using ObjectDetectionApp.Views;
 using DrawingRectangle = System.Drawing.Rectangle;
 using ShapesRectangle = System.Windows.Shapes.Rectangle;
+using System.IO;
+using System.Text.Json;
+using Microsoft.Win32;
 
 namespace ObjectDetectionApp
 {
@@ -38,6 +40,9 @@ namespace ObjectDetectionApp
         private List<SavedModel> _savedModels;
         private SavedModel _currentModel;
 
+        // 모델 저장 디렉토리
+        private readonly string _modelsBaseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedModels");
+
         public MainWindow()
         {
             InitializeComponent();
@@ -57,7 +62,49 @@ namespace ObjectDetectionApp
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             RefreshCameraList();
-            UpdateModelList();
+            LoadSavedModelsFromDisk();
+
+            // If there is any saved model, try to activate/train the most appropriate one so
+            // Detection mode can be used immediately without forcing the user to re-train.
+            try
+            {
+                // Prefer an explicitly active model
+                var active = _savedModels.FirstOrDefault(m => m.IsActive);
+                if (active == null && _savedModels.Count > 0)
+                {
+                    // fallback: use the most recently created model
+                    active = _savedModels.OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+                }
+
+                if (active != null)
+                {
+                    // Ensure only this is marked active
+                    foreach (var m in _savedModels) m.IsActive = false;
+                    active.IsActive = true;
+                    _currentModel = active;
+
+                    // Try to initialize detection service with the loaded model
+                    try
+                    {
+                        var trained = _detectionService.TrainModel(active.TrainingData);
+                        if (!trained)
+                        {
+                            Console.WriteLine($"Warning: failed to initialize detection from saved model '{active.Name}'");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error initializing detection from saved model: {ex.Message}");
+                    }
+                }
+
+                UpdateModelList();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"MainWindow_Loaded model init error: {ex.Message}");
+                UpdateModelList();
+            }
         }
 
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -65,6 +112,7 @@ namespace ObjectDetectionApp
             _cameraService?.StopCamera();
             _cameraService?.Dispose();
             _currentFrame?.Dispose();
+            _detectionService?.Dispose();
         }
 
         #region 카메라 관리
@@ -97,11 +145,15 @@ namespace ObjectDetectionApp
             {
                 _selectedCameraIndex = cameraInfo.Index;
 
-                // 현재 모드에 따라 카메라 시작
-                if (_currentMode == AppMode.Training || _currentMode == AppMode.Detection)
+                // 선택할 때마다 해당 카메라를 연결하도록 변경
+                try
                 {
-                    StartCamera();
+                    // Stop any running camera first
+                    _cameraService.StopCamera();
                 }
+                catch { }
+
+                StartCamera();
             }
         }
 
@@ -184,11 +236,33 @@ namespace ObjectDetectionApp
 
         private void DetectionMode_Click(object sender, RoutedEventArgs e)
         {
+            // If detection service is not trained yet, but a saved/current model exists try to train it on the fly.
             if (!_detectionService.IsModelTrained())
             {
-                MessageBox.Show("먼저 학습 모드에서 객체를 학습시켜주세요.", "모델 미학습",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                if (_currentModel != null && _currentModel.TrainingData != null && _currentModel.TrainingData.Count > 0)
+                {
+                    try
+                    {
+                        var trained = _detectionService.TrainModel(_currentModel.TrainingData);
+                        if (!trained)
+                        {
+                            MessageBox.Show("로드된 모델로부터 검출 모델을 생성하지 못했습니다. 학습 모드에서 모델을 학습하세요.", "모델 미학습",
+                                MessageBoxButton.OK, MessageBoxImage.Information);
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"모델 초기화 중 오류 발생: {ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("먼저 학습 모드에서 객체를 학습시켜주세요.", "모델 미학습",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
             }
 
             SwitchMode(AppMode.Detection);
@@ -565,6 +639,20 @@ namespace ObjectDetectionApp
             {
                 _savedModels.Remove(model);
 
+                // 파일 시스템에서 제거
+                try
+                {
+                    var modelDir = GetModelDirectory(model);
+                    if (Directory.Exists(modelDir))
+                    {
+                        Directory.Delete(modelDir, true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to delete model files: {ex.Message}");
+                }
+
                 // 활성 모델이 삭제되었다면 초기화
                 if (model.IsActive)
                 {
@@ -695,6 +783,16 @@ namespace ObjectDetectionApp
 
                     _savedModels.Add(newModel);
                     _currentModel = newModel;
+
+                    // Save model to disk
+                    try
+                    {
+                        SaveModelToDisk(newModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Failed to save model to disk: {ex.Message}");
+                    }
 
                     UpdateModelList();
 
@@ -883,6 +981,258 @@ namespace ObjectDetectionApp
         private void CameraImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             _isDragging = false;
+        }
+
+        #endregion
+
+        #region 모델 파일 입출력
+
+        private void SaveModelToDisk(SavedModel model)
+        {
+            if (model == null) return;
+
+            Directory.CreateDirectory(_modelsBaseDir);
+
+            string modelFolderName = SanitizeFileName($"{model.Id}_{model.Name}");
+            string modelDir = Path.Combine(_modelsBaseDir, modelFolderName);
+            Directory.CreateDirectory(modelDir);
+
+            string imagesDir = Path.Combine(modelDir, "images");
+            Directory.CreateDirectory(imagesDir);
+
+            // Save each training image
+            var trainingMeta = new List<object>();
+            foreach (var td in model.TrainingData)
+            {
+                string imgFileName = td.Id + ".png";
+                string imgPath = Path.Combine(imagesDir, imgFileName);
+
+                try
+                {
+                    if (td.ImageData != null && td.ImageData.Length > 0)
+                    {
+                        File.WriteAllBytes(imgPath, td.ImageData);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to write image file: {ex.Message}");
+                }
+
+                trainingMeta.Add(new
+                {
+                    td.Id,
+                    td.LabelName,
+                    td.BoundingBox,
+                    td.CreatedAt,
+                    ImageFile = Path.Combine("images", imgFileName)
+                });
+            }
+
+            var modelMeta = new
+            {
+                model.Id,
+                model.Name,
+                model.CreatedAt,
+                model.SampleCount,
+                model.Labels,
+                model.IsActive,
+                Training = trainingMeta
+            };
+
+            string json = JsonSerializer.Serialize(modelMeta, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(Path.Combine(modelDir, "model.json"), json);
+        }
+
+        private string SanitizeFileName(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+            {
+                name = name.Replace(c, '_');
+            }
+            return name;
+        }
+
+        private void LoadSavedModelsFromDisk()
+        {
+            _savedModels.Clear();
+
+            try
+            {
+                if (!Directory.Exists(_modelsBaseDir))
+                    return;
+
+                foreach (var dir in Directory.GetDirectories(_modelsBaseDir))
+                {
+                    string jsonPath = Path.Combine(dir, "model.json");
+                    if (!File.Exists(jsonPath))
+                        continue;
+
+                    try
+                    {
+                        var model = LoadModelFromFile(jsonPath);
+                        if (model != null)
+                        {
+                            _savedModels.Add(model);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Failed to load model from {jsonPath}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"LoadSavedModelsFromDisk error: {ex.Message}");
+            }
+        }
+
+        private SavedModel LoadModelFromFile(string jsonFilePath)
+        {
+            if (!File.Exists(jsonFilePath)) return null;
+
+            string dir = Path.GetDirectoryName(jsonFilePath);
+            string json = File.ReadAllText(jsonFilePath);
+
+            using (var doc = JsonDocument.Parse(json))
+            {
+                var root = doc.RootElement;
+                var model = new SavedModel();
+
+                if (root.TryGetProperty("Id", out var idProp)) model.Id = idProp.GetString();
+                if (root.TryGetProperty("Name", out var nameProp)) model.Name = nameProp.GetString();
+                if (root.TryGetProperty("CreatedAt", out var createdProp) && createdProp.TryGetDateTime(out var dt)) model.CreatedAt = dt;
+                if (root.TryGetProperty("SampleCount", out var scProp) && scProp.TryGetInt32(out var sc)) model.SampleCount = sc;
+                if (root.TryGetProperty("IsActive", out var actProp) && actProp.ValueKind == JsonValueKind.True) model.IsActive = true;
+
+                if (root.TryGetProperty("Labels", out var labelsProp) && labelsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var l in labelsProp.EnumerateArray())
+                    {
+                        model.Labels.Add(l.GetString());
+                    }
+                }
+
+                if (root.TryGetProperty("Training", out var trainingProp) && trainingProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in trainingProp.EnumerateArray())
+                    {
+                        try
+                        {
+                            var td = new TrainingData();
+                            if (item.TryGetProperty("Id", out var tid)) td.Id = tid.GetString();
+                            if (item.TryGetProperty("LabelName", out var lbl)) td.LabelName = lbl.GetString();
+                            if (item.TryGetProperty("CreatedAt", out var cat) && cat.TryGetDateTime(out var cdt)) td.CreatedAt = cdt;
+
+                            if (item.TryGetProperty("BoundingBox", out var bbox))
+                            {
+                                int x = bbox.GetProperty("X").GetInt32();
+                                int y = bbox.GetProperty("Y").GetInt32();
+                                int w = bbox.GetProperty("Width").GetInt32();
+                                int h = bbox.GetProperty("Height").GetInt32();
+                                td.BoundingBox = new System.Drawing.Rectangle(x, y, w, h);
+                            }
+
+                            if (item.TryGetProperty("ImageFile", out var imgFileProp))
+                            {
+                                string relPath = imgFileProp.GetString();
+                                string imgFullPath = Path.Combine(dir, relPath.Replace('/', Path.DirectorySeparatorChar));
+                                if (File.Exists(imgFullPath))
+                                {
+                                    td.ImageData = File.ReadAllBytes(imgFullPath);
+                                }
+                            }
+
+                            model.TrainingData.Add(td);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Failed to parse training item: {ex.Message}");
+                        }
+                    }
+                }
+
+                return model;
+            }
+        }
+
+        private string GetModelDirectory(SavedModel model)
+        {
+            if (model == null) return _modelsBaseDir;
+            string folderName = SanitizeFileName($"{model.Id}_{model.Name}");
+            return Path.Combine(_modelsBaseDir, folderName);
+        }
+
+        private void LoadModelButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Open file dialog to select model.json in SavedModels
+            var dlg = new OpenFileDialog();
+            dlg.Title = "모델 불러오기";
+            dlg.Filter = "Model JSON|model.json|All files|*.*";
+            dlg.InitialDirectory = Directory.Exists(_modelsBaseDir) ? _modelsBaseDir : AppDomain.CurrentDomain.BaseDirectory;
+
+            if (dlg.ShowDialog() == true)
+            {
+                try
+                {
+                    var model = LoadModelFromFile(dlg.FileName);
+                    if (model != null)
+                    {
+                        // Ensure uniqueness by Id
+                        if (_savedModels.Any(m => m.Id == model.Id))
+                        {
+                            MessageBox.Show("이미 불러온 모델입니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        else
+                        {
+                            // Add to list
+                            _savedModels.Add(model);
+
+                            // Train detection service with loaded model so Detection mode can be used immediately
+                            try
+                            {
+                                bool trained = _detectionService.TrainModel(model.TrainingData);
+
+                                if (trained)
+                                {
+                                    // Mark this model as active and deactivate others
+                                    foreach (var m in _savedModels)
+                                        m.IsActive = false;
+
+                                    model.IsActive = true;
+                                    _currentModel = model;
+
+                                    UpdateModelList();
+
+                                    MessageBox.Show($"'{model.Name}' 모델을 불러왔고 검출에 사용할 수 있습니다.", "모델 불러옴", MessageBoxButton.OK, MessageBoxImage.Information);
+                                }
+                                else
+                                {
+                                    UpdateModelList();
+                                    MessageBox.Show($"'{model.Name}' 모델을 불러왔지만 내부 학습 데이터로부터 검출 모델을 생성하지 못했습니다.", "경고", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                UpdateModelList();
+                                MessageBox.Show($"모델을 불러왔으나 검출 모델 초기화 중 오류 발생: {ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                            }
+
+                            // Ask user whether they want to explicitly activate (keep for backward compatibility)
+                            var result = MessageBox.Show($"'{model.Name}' 모델을 목록에 추가했습니다. 활성화 상태로 설정했습니다. 검출 모드로 전환하시겠습니까?", "모델 불러옴", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                            if (result == MessageBoxResult.Yes)
+                            {
+                                SwitchMode(AppMode.Detection);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"모델 불러오기 실패: {ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
         }
 
         #endregion

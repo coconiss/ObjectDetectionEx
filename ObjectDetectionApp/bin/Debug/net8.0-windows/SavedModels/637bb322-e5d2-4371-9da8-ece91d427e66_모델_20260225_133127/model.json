@@ -1,0 +1,39 @@
+{
+  "Id": "637bb322-e5d2-4371-9da8-ece91d427e66",
+  "Name": "\uBAA8\uB378_20260225_133127",
+  "CreatedAt": "2026-02-25T13:31:29.6236735+09:00",
+  "SampleCount": 1,
+  "Labels": [
+    "monitor"
+  ],
+  "IsActive": true,
+  "Training": [
+    {
+      "Id": "0eb48f1d-8338-4309-bef9-88601b9833a1",
+      "LabelName": "monitor",
+      "BoundingBox": {
+        "Location": {
+          "IsEmpty": false,
+          "X": 319,
+          "Y": 210
+        },
+        "Size": {
+          "IsEmpty": false,
+          "Width": 258,
+          "Height": 162
+        },
+        "X": 319,
+        "Y": 210,
+        "Width": 258,
+        "Height": 162,
+        "Left": 319,
+        "Top": 210,
+        "Right": 577,
+        "Bottom": 372,
+        "IsEmpty": false
+      },
+      "CreatedAt": "2026-02-25T13:31:18.6817007+09:00",
+      "ImageFile": "images\\0eb48f1d-8338-4309-bef9-88601b9833a1.png"
+    }
+  ]
+}
